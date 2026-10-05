@@ -24,13 +24,18 @@ class AliasTakenError(ValueError):
     pass
 
 
-def create_short_url(
+def validate_short_url(
     original_url, custom_alias, expires_in_hours, max_expiry_hours, shortener_host
 ):
     normalized_url = normalize_url(original_url)
     reject_shortener_url(normalized_url, shortener_host)
     expires_at = calculate_expiry(expires_in_hours, max_expiry_hours)
     alias = normalize_alias(custom_alias)
+    return normalized_url, alias, expires_at
+
+
+def create_short_url(normalized_url, alias, expires_at):
+    """Persist validated link data and return its unique short code."""
     if alias:
         if not insert_url(alias, normalized_url, expires_at):
             raise AliasTakenError()

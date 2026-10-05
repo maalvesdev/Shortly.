@@ -1,17 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon/favicon.svg') }}">
-    <link rel="icon" type="image/png" sizes="96x96" href="{{ url_for('static', filename='favicon/favicon-96x96.png') }}">
-    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon/favicon.ico') }}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='favicon/apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ url_for('static', filename='favicon/site.webmanifest') }}">
-    <title>Link expired — Shortly</title>
-</head>
-<body>
+{% extends "base.html" %}
+
+{% block title %}Link expired — Shortly{% endblock %}
+
+{% block content %}
     <main class="page-shell">
         <section class="card status-card">
             <p class="eyebrow">410</p>
@@ -20,5 +11,4 @@
             <a class="primary-button link-button" href="/">Create a new link</a>
         </section>
     </main>
-</body>
-</html>
+{% endblock %}

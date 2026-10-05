@@ -15,6 +15,7 @@ from url_service import (
     InvalidUrlError,
     create_short_url,
     get_destination,
+    validate_short_url,
 )
 
 
@@ -44,6 +45,20 @@ def create_app(test_config=None):
 
     @app.post("/api/shorten")
     def shorten_url():
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return api_error("Send a JSON object in the request body.")
+        try:
+            normalized_url, alias, expires_at = validate_short_url(
+                data.get("original_url"),
+                data.get("custom_url"),
+                data.get("expires_in_hours"),
+                app.config["MAX_EXPIRY_HOURS"],
+                request.host,
+            )
+        except (InvalidUrlError, InvalidAliasError) as error:
+            return api_error(str(error))
+
         client_key = get_client_key(app.config["RATE_LIMIT_SECRET"])
         if not consume_rate_limit(
             client_key,
@@ -57,19 +72,8 @@ def create_app(test_config=None):
             response.headers["Retry-After"] = str(app.config["RATE_LIMIT_WINDOW_SECONDS"])
             return response, status
 
-        data = request.get_json(silent=True)
-        if not isinstance(data, dict):
-            return api_error("Send a JSON object in the request body.")
         try:
-            short_code = create_short_url(
-                data.get("original_url"),
-                data.get("custom_url"),
-                data.get("expires_in_hours"),
-                app.config["MAX_EXPIRY_HOURS"],
-                request.host,
-            )
-        except (InvalidUrlError, InvalidAliasError) as error:
-            return api_error(str(error))
+            short_code = create_short_url(normalized_url, alias, expires_at)
         except AliasTakenError:
             return api_error("This custom alias is already taken.", 409)
         return jsonify(short_code=short_code, short_url=f"{request.url_root}{short_code}"), 201

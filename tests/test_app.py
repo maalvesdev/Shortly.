@@ -32,6 +32,23 @@ class UrlShortenerTests(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertIn("error", response.json)
 
+    def test_invalid_requests_do_not_consume_rate_limit_quota(self):
+        limited_app = create_app(
+            {
+                "TESTING": True,
+                "DATABASE": self.database_file.name,
+                "RATE_LIMIT_MAX_REQUESTS": 1,
+                "RATE_LIMIT_WINDOW_SECONDS": 300,
+            }
+        )
+        limited_client = limited_app.test_client()
+        invalid_response = limited_client.post("/api/shorten", json={})
+        valid_response = limited_client.post(
+            "/api/shorten", json={"original_url": "https://example.com"}
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertEqual(valid_response.status_code, 201)
+
     def test_rejects_a_link_to_the_shortener_itself(self):
         response = self.client.post(
             "/api/shorten",
