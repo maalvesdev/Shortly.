@@ -170,6 +170,7 @@ input:focus, select:focus {
     cursor: pointer;
     font: inherit;
     font-weight: 400;
+    transition: background-color .18s ease, border-color .18s ease, color .18s ease;
 }
 
 .primary-button {
@@ -179,7 +180,8 @@ input:focus, select:focus {
     background: var(--accent);
 }
 
-.primary-button:hover {
+.primary-button:hover:not(:disabled),
+.primary-button:focus-visible {
     background: var(--accent-dark);
 }
 
@@ -222,7 +224,19 @@ input:focus, select:focus {
     color: var(--text);
     background: transparent;
     border: 1px solid var(--border);
+}
 
+.copy-button:hover,
+.copy-button:focus-visible {
+    color: white;
+    background: var(--accent-dark);
+    border-color: var(--accent-dark);
+}
+
+.primary-button:focus-visible,
+.copy-button:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--accent), transparent 55%);
+    outline-offset: 3px;
 }
 
 .footer {
