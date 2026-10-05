@@ -10,8 +10,16 @@
     --error: #ff9b9b;
 }
 
-*
-{ box-sizing: border-box; }
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    overflow-x: hidden;
+}
 
 body {
     min-height: 100vh;
@@ -51,6 +59,13 @@ body {
 .form-fields {
     padding-block: 1.5rem;
     padding-inline: clamp(1.5rem, 4vw, 2.0rem);
+}
+
+form,
+.form-fields,
+.field-row,
+.field-row > div {
+    min-width: 0;
 }
 
 .eyebrow {
@@ -94,8 +109,12 @@ label span {
     font-weight: 400;
 }
 
-input, select {
+input,
+select {
+    display: block;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     height: 48px;
     min-height: 48px;
     padding: .7rem .85rem;
@@ -106,6 +125,19 @@ input, select {
     font: inherit;
 }
 
+select {
+    appearance: none;
+    padding-right: 2.75rem;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--text) 50%),
+        linear-gradient(135deg, var(--text) 50%, transparent 50%);
+    background-position:
+        calc(100% - 1.15rem) 50%,
+        calc(100% - .85rem) 50%;
+    background-repeat: no-repeat;
+    background-size: .35rem .35rem;
+}
+
 input:focus, select:focus {
     outline: 3px solid color-mix(in srgb, var(--accent), transparent 70%);
     border-color: var(--accent);
@@ -114,7 +146,8 @@ input:focus, select:focus {
 .field-row {
     display: grid;
     grid-template-columns: 1.5fr 1fr;
-    gap: 1rem; margin-top: 1rem;
+    gap: 1rem;
+    margin-top: 1rem;
 }
 
 .message {
@@ -221,21 +254,36 @@ input:focus, select:focus {
     }
 }
 
-@media (max-width: 500px) {
+@media (max-width: 640px) {
     .page-shell {
         padding-top: 5rem;
     }
+
     .field-row {
         grid-template-columns: 1fr;
     }
+
     .result-row {
         align-items: stretch;
         flex-direction: column;
     }
+
     .result-row a {
         padding: .5rem 0;
     }
+
     .copy-button {
         min-height: 44px;
+    }
+}
+
+@media (max-width: 360px) {
+    .page-shell {
+        width: min(100% - 1.5rem, 820px);
+        padding-top: 4rem;
+    }
+
+    .form-fields {
+        padding-inline: 1rem;
     }
 }

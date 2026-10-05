@@ -71,7 +71,7 @@ def create_app(test_config=None):
         except (InvalidUrlError, InvalidAliasError) as error:
             return api_error(str(error))
         except AliasTakenError:
-            return api_error("That custom alias is already taken.", 409)
+            return api_error("This custom alias is already taken.", 409)
         return jsonify(short_code=short_code, short_url=f"{request.url_root}{short_code}"), 201
 
     @app.get("/<short_code>")

@@ -49,14 +49,20 @@ class UrlShortenerTests(unittest.TestCase):
         self.client.post("/api/shorten", json=payload)
         response = self.client.post("/api/shorten", json=payload)
         self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json["error"],
+            "This custom alias is already taken.",
+        )
 
     def test_expired_link_returns_gone_page(self):
         with self.app.app_context():
             get_db().execute("INSERT INTO urls VALUES (?, ?, ?)", ("old-link", "https://example.com", 1))
             get_db().commit()
-        response = self.client.get("/old-link")
-        self.assertEqual(response.status_code, 410)
-        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        for _ in range(2):
+            response = self.client.get("/old-link")
+            self.assertEqual(response.status_code, 410)
+            self.assertIn(b"This link has expired.", response.data)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
 
     def test_missing_link_is_not_cached(self):
         response = self.client.get("/does-not-exist")

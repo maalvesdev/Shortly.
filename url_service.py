@@ -116,7 +116,5 @@ def get_destination(short_code):
     if row is None:
         return None
     if row["expires_at"] is not None and time.time() >= row["expires_at"]:
-        execute("DELETE FROM urls WHERE short_code = ?", (short_code,))
-        get_db().commit()
         return "expired"
     return row["original_url"]
