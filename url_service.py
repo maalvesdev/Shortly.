@@ -4,14 +4,19 @@ import re
 import secrets
 import string
 import time
-from urllib.parse import urlparse
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 
+import idna
 from psycopg.errors import UniqueViolation
 
 from database import get_db
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 SHORT_CODE_ALPHABET = string.ascii_letters + string.digits
+MAX_URL_LENGTH = 4_096
+AUTHORITY_PATTERN = re.compile(r"(?:\[[^\[\]]+\]|[^:\[\]@]+)(?::[0-9]+)?")
+HOST_LABEL_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
 class InvalidUrlError(ValueError):
@@ -50,25 +55,103 @@ def create_short_url(normalized_url, alias, expires_at):
 
 
 def normalize_url(value):
+    """Validate a web URL's syntax without fetching or resolving its destination."""
     if not isinstance(value, str) or not value.strip():
         raise InvalidUrlError("Enter a URL to shorten.")
+    if any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in value):
+        raise InvalidUrlError("URLs must not contain control characters.")
+    if "\\" in value:
+        raise InvalidUrlError("URLs must not contain backslashes; encode them as %5C.")
+
     value = value.strip()
-    if "://" not in value:
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value):
         value = f"https://{value}"
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if re.search(r"%(?![0-9A-Fa-f]{2})", value):
+        raise InvalidUrlError("Use valid percent-encoding in the URL, such as %20 for a space.")
+
+    try:
+        value.encode("utf-8")
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidUrlError("Enter a valid http or https URL with a valid hostname and port.") from error
+
+    if parsed.scheme not in {"http", "https"} or not hostname:
         raise InvalidUrlError("Enter a valid http or https URL.")
-    return value
+    if parsed.username is not None or parsed.password is not None:
+        raise InvalidUrlError("URLs containing a username or password are not supported.")
+    if not AUTHORITY_PATTERN.fullmatch(parsed.netloc):
+        raise InvalidUrlError("Enter a valid URL hostname and port.")
+    if parsed.netloc.startswith("[") and ":" not in hostname:
+        raise InvalidUrlError("Use a valid IPv6 address inside URL brackets.")
+
+    hostname = _normalize_hostname(hostname)
+    authority = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None:
+        authority = f"{authority}:{port}"
+
+    # Preserve the path, query, and fragment, including empty ? and # markers.
+    remainder = value.split("://", 1)[1]
+    suffix = remainder[len(parsed.netloc):]
+    normalized_url = f"{parsed.scheme}://{authority}{suffix}"
+    if len(normalized_url) > MAX_URL_LENGTH:
+        raise InvalidUrlError(f"URLs must be at most {MAX_URL_LENGTH} characters long.")
+    return normalized_url
+
+
+def _normalize_hostname(hostname):
+    """Return a canonical IP address or validated ASCII/IDNA DNS hostname."""
+    if "%" in hostname:
+        raise InvalidUrlError("Enter a URL with a valid hostname or IP address.")
+    try:
+        return str(ip_address(hostname))
+    except ValueError:
+        pass
+
+    try:
+        mapped_hostname = idna.uts46_remap(hostname, std3_rules=True)
+        labels = mapped_hostname.removesuffix(".").split(".")
+        ascii_labels = []
+        for label in labels:
+            if label.isascii() and not label.startswith("xn--"):
+                # Ordinary ASCII DNS labels need not follow IDNA's reserved-hyphen rule.
+                if not HOST_LABEL_PATTERN.fullmatch(label):
+                    raise InvalidUrlError("Enter a URL with a valid hostname or IP address.")
+                ascii_labels.append(label)
+            else:
+                ascii_labels.append(idna.alabel(label).decode("ascii"))
+    except idna.IDNAError as error:
+        raise InvalidUrlError("Enter a URL with a valid hostname or IP address.") from error
+
+    ascii_hostname = ".".join(ascii_labels)
+    if len(ascii_hostname) > 253:
+        raise InvalidUrlError("Enter a URL with a valid hostname or IP address.")
+    if mapped_hostname.endswith("."):
+        ascii_hostname += "."
+
+    # Browsers interpret numeric final labels as IPv4, not ordinary DNS names.
+    last_label = ascii_hostname.removesuffix(".").rsplit(".", 1)[-1]
+    if re.fullmatch(r"(?:[0-9]+|0x[0-9a-f]+)", last_label, re.IGNORECASE):
+        try:
+            return str(ip_address(ascii_hostname.removesuffix(".")))
+        except ValueError as error:
+            raise InvalidUrlError("Enter a URL with a valid IPv4 address.") from error
+    return ascii_hostname
 
 
 def reject_shortener_url(url, shortener_host):
     """Prevent links that redirect back into this shortener's own routes."""
-    destination_host = urlparse(url).hostname
-    current_host = urlparse(f"//{shortener_host}").hostname
+    try:
+        destination_host = urlsplit(url).hostname
+        current_host = urlsplit(f"//{shortener_host}").hostname
+    except ValueError as error:
+        raise InvalidUrlError("Enter a valid http or https URL.") from error
     if (
         destination_host
         and current_host
-        and destination_host.lower() == current_host.lower()
+        and _normalize_hostname(destination_host).rstrip(".")
+        == _normalize_hostname(current_host).rstrip(".")
     ):
         raise InvalidUrlError("You cannot shorten a Shortly link.")
 

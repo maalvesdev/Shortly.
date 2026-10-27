@@ -8,6 +8,7 @@ from dotenv import dotenv_values
 
 from app import create_app
 from database import get_db
+from url_service import MAX_URL_LENGTH
 
 
 class UrlShortenerTests(unittest.TestCase):
@@ -80,6 +81,102 @@ class UrlShortenerTests(unittest.TestCase):
         )
         self.assertEqual(invalid_response.status_code, 400)
         self.assertEqual(valid_response.status_code, 201)
+
+    def test_malformed_urls_do_not_create_records_or_consume_rate_limit_quota(self):
+        limited_app = create_app(
+            {
+                **self.test_config,
+                "RATE_LIMIT_MAX_REQUESTS": 1,
+                "RATE_LIMIT_WINDOW_SECONDS": 300,
+            }
+        )
+        client = limited_app.test_client()
+        invalid_urls = (
+            "https://@",
+            "https://example.com:badport",
+            "https://example.com:65536",
+            "https://foo bar.com",
+            "http://[broken",
+            "https://[::1]suffix/docs",
+            "https://999.999.999.999",
+            "https://example.com/\r\nInjected: yes",
+            "https://example.com/a\x00b",
+            "https://example.com/\ud800",
+            r"https://example.com\other-host",
+            "https://example.com/%ZZ",
+            "https://user:password@example.com",
+            "https://example.com/" + "a" * MAX_URL_LENGTH,
+        )
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                response = client.post("/api/shorten", json={"original_url": url})
+                self.assertEqual(response.status_code, 400)
+                self.assertTrue(response.is_json)
+                self.assertIsInstance(response.json["error"], str)
+                self.assertTrue(response.json["error"])
+
+        with limited_app.app_context():
+            connection = get_db()
+            self.assertEqual(connection.execute("SELECT COUNT(*) AS count FROM urls").fetchone()["count"], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) AS count FROM rate_limits").fetchone()["count"], 0)
+
+        valid_response = client.post("/api/shorten", json={"original_url": "https://example.com"})
+        self.assertEqual(valid_response.status_code, 201)
+
+    def test_supported_url_destinations_create_links_and_redirect_successfully(self):
+        cases = (
+            ("https://example.com/docs?x=1#part", "https://example.com/docs?x=1#part"),
+            (
+                "example.com/?next=https://other.example/path",
+                "https://example.com/?next=https://other.example/path",
+            ),
+            (
+                "HTTPS://EXAMPLE.COM:8443/path?value=%2F#part",
+                "https://example.com:8443/path?value=%2F#part",
+            ),
+            (
+                "https://m\u00fcnich.example/caf\u00e9?q=%2F#part",
+                "https://xn--mnich-kva.example/caf%C3%A9?q=%2F#part",
+            ),
+            ("https://fa\u00df.de/docs", "https://xn--fa-hia.de/docs"),
+            ("http://192.0.2.1:8080/docs", "http://192.0.2.1:8080/docs"),
+            ("https://[2001:db8::1]:8443/docs", "https://[2001:db8::1]:8443/docs"),
+            (
+                "https://example.com/a%20b?q=%252F#part%201",
+                "https://example.com/a%20b?q=%252F#part%201",
+            ),
+            (
+                "https://example.com/search?q=hello world",
+                "https://example.com/search?q=hello%20world",
+            ),
+        )
+        for index, (original_url, destination) in enumerate(cases):
+            with self.subTest(original_url=original_url):
+                alias = f"destination-{index}"
+                response = self.client.post(
+                    "/api/shorten",
+                    json={"original_url": original_url, "custom_url": alias},
+                )
+                self.assertEqual(response.status_code, 201)
+                redirect_response = self.client.get(f"/{alias}", follow_redirects=False)
+                self.assertEqual(redirect_response.status_code, 302)
+                self.assertEqual(redirect_response.headers["Location"], destination)
+
+    def test_normalized_shortener_hostnames_are_still_rejected(self):
+        cases = (
+            ("https://shortly.example", "HTTPS://SHORTLY.EXAMPLE./existing"),
+            ("https://xn--fa-hia.de", "https://fa\u00df.de/existing"),
+            ("https://[2001:db8::1]", "https://[2001:0db8:0:0:0:0:0:1]/existing"),
+        )
+        for base_url, original_url in cases:
+            with self.subTest(original_url=original_url):
+                response = self.client.post(
+                    "/api/shorten",
+                    base_url=base_url,
+                    json={"original_url": original_url},
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json["error"], "You cannot shorten a Shortly link.")
 
     def test_rejects_a_link_to_the_shortener_itself(self):
         response = self.client.post(

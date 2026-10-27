@@ -10,7 +10,9 @@ This project is a practical exercise in the backend and deployment fundamentals 
 
 ## Features
 
-- Shortens valid `http` and `https` URLs
+- Shortens syntactically valid `http` and `https` URLs, adding HTTPS when the scheme is omitted
+- Accepts DNS hostnames, IPv4, bracketed IPv6, and explicit ports; normalizes internationalized hostnames to ASCII using IDNA
+- Enforces a 4,096-character limit after normalization and rejects malformed URLs or embedded credentials
 - Supports optional custom aliases (3–32 letters, numbers, hyphens, or underscores)
 - Offers link expiration: 1 hour, 24 hours, 7 days, or never
 - Generates random short codes with Python's `secrets` module
@@ -136,6 +138,12 @@ Never commit real credentials. `.env` is ignored by Git; `.env.example` contains
 
 `custom_url` is optional. Send an empty `expires_in_hours` value for a link that does not expire.
 
+`original_url` accepts HTTP or HTTPS URLs and adds `https://` when the scheme is omitted. Validation requires a valid hostname or IP address and a valid port when supplied. The scheme and hostname are normalized, including IDNA conversion of internationalized hostnames to ASCII; the path, query, and fragment are preserved, including correctly percent-encoded data.
+
+The normalized URL must not exceed 4,096 characters, including its scheme and any IDNA hostname expansion. Embedded username/password credentials are not accepted. Malformed hosts, ports, percent escapes, raw control characters, or backslashes return a JSON `400` validation error before a link is stored or rate-limit quota is consumed.
+
+Validation checks URL syntax, not whether the destination exists or is reachable; it does not make DNS or HTTP requests.
+
 A successful request returns `201 Created`:
 
 ```json
@@ -162,7 +170,7 @@ Run the suite in a separate, temporary application container:
 docker compose run --build --rm web python -m unittest discover -s tests -v
 ```
 
-This command uses the container's `TEST_DATABASE_URL`, removes the test container when it finishes, and does not publish its web port. The normal application can remain running. The suite covers custom-link creation and redirects, invalid input, duplicate aliases, expired links, and rate limiting.
+This command uses the container's `TEST_DATABASE_URL`, removes the test container when it finishes, and does not publish its web port. The normal application can remain running. The suite covers custom-link creation and redirects, malformed hosts and ports, URL length boundaries, internationalized domains, duplicate aliases, expired links, and rate limiting. API tests also verify rejected URLs create no records and consume no rate-limit quota.
 
 Tests verify the connected database is named `shortly_test` before creating tables or clearing data. They clear the `urls` and `rate_limits` tables in that database between tests. Keep it for tests only and run this suite serially, not with parallel test workers. The development database `shortly` is not used by these tests.
 
@@ -173,6 +181,12 @@ python -m unittest discover -s tests -v
 ```
 
 This alternative reads the host's `TEST_DATABASE_URL` from your terminal environment or `.env`, where the example points to `127.0.0.1:5432/shortly_test`.
+
+With the Python dependencies installed, the URL-validation unit tests can also run without PostgreSQL or Docker:
+
+```powershell
+python -m unittest discover -s tests -p test_url_validation.py -v
+```
 
 ## Deployment notes
 
