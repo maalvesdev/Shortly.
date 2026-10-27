@@ -209,6 +209,52 @@ gunicorn 'app:create_app()'
 
 If an existing deployment uses `gunicorn app:app`, update it to the factory command above. Gunicorn is not the development server used on Windows; `python app.py` continues to work locally.
 
+### Container maintenance
+
+The Docker image uses Python 3.14 on Debian Trixie. During the build, it installs the application dependencies and runs `pip check`, then removes `pip` and its optional bootstrap module, `ensurepip`. These installers contain bundled libraries that Shortly does not need at runtime. To add a dependency, edit `requirements.txt` and rebuild the image. The optional Python environment on your computer keeps its own pip installation.
+
+To refresh the base image and dependencies, test the result, restart the local app, and inspect the image with Docker Scout:
+
+```powershell
+docker compose build --pull --no-cache web
+docker compose run --rm web python -m unittest discover -s tests -v
+docker compose up --wait
+docker scout cves local://shortly-web:latest --locations
+```
+
+Docker Scout requires Docker sign-in. Its report can also be viewed through Docker Desktop's image analysis. Inspect package locations to distinguish application dependencies from installer or operating-system components.
+
+Remaining system-package findings reviewed on October 27, 2026:
+
+- **zlib / CVE-2026-85091:** the installed version is still marked vulnerable by [Debian's security tracker](https://security-tracker.debian.org/tracker/CVE-2026-85091), and the configured stable repositories currently offer no newer package. Keep this finding open and recheck when the base image or stable package is updated. The affected-version range is under discussion; a smaller version number alone does not establish safety.
+- **tar / CVE-2025-45582:** [Debian describes this issue as disputed](https://security-tracker.debian.org/tracker/CVE-2025-45582). Shortly does not accept or extract archives, so the described archive-extraction scenario is not exposed by its current application features.
+
+These findings remain visible in the scan. Reassess them if the application gains new features or is publicly deployed; scan results change as advisories and images are updated.
+
+The PostgreSQL image was also checked on October 27, 2026. The local `postgres:18` image was already the current official image, running PostgreSQL 18.6. Its four critical findings all point to Go 1.24.6 in `/usr/local/bin/gosu`, the helper that switches to the database user during startup:
+
+| Finding | Applicability assessment |
+| --- | --- |
+| [CVE-2025-68121](https://pkg.go.dev/vuln/GO-2026-4337) | Requires Go TLS session resumption; no TLS calls appear in the reviewed gosu startup code. |
+| [CVE-2026-56857](https://pkg.go.dev/vuln/GO-2026-6604) | Concerns Windows junction handling; this image runs Linux. |
+| [CVE-2026-39821](https://pkg.go.dev/vuln/GO-2026-5026) | Concerns HTTP/IDNA hostname conversion; no corresponding calls appear in the reviewed gosu code. |
+| [CVE-2026-78663](https://pkg.go.dev/vuln/GO-2026-6612) | Requires a Go HTTP/2 server; gosu does not run one. |
+
+The follow-up scan reported 33 high findings: 30 in gosu's Go standard library, two in libxml2, and one in zlib. A binary scan of the actual gosu executable using `govulncheck` v1.9.0 found no affected standard-library symbols for those 30 high and four critical advisories; all 34 CVEs were covered by the checker's advisory data. This supports the source review and [gosu's security policy](https://github.com/tianon/gosu/security). Binary symbol analysis has limitations and does not establish that the image has no security issues. Docker Scout's alerts remain visible.
+
+The binary check did identify one separate medium-severity advisory, [CVE-2026-61801](https://github.com/moby/sys/security/advisories/GHSA-mjcv-p78q-w5fw), in gosu's user/group parser. It requires attacker-controlled account files such as `/etc/passwd` or `/etc/group`; Shortly's current inputs and volume mounts do not provide that capability. The dependency is fixed in [gosu 1.20](https://github.com/tianon/gosu/pull/181), so recheck when the official PostgreSQL image adopts it.
+
+The three high-severity Debian findings remain open: [libxml2 CVE-2026-74860](https://security-tracker.debian.org/tracker/CVE-2026-74860), [libxml2 CVE-2026-86140](https://security-tracker.debian.org/tracker/CVE-2026-86140), and zlib CVE-2026-85091. The configured stable repositories currently offer no newer versions of those packages. Comparing the official `postgres:18-alpine` image did not offer a clear improvement: it retained the same Go findings and had additional findings, so the database image was not changed.
+
+To check for PostgreSQL 18 image updates and scan the downloaded image:
+
+```powershell
+docker compose pull db
+docker scout cves local://postgres:18 --locations
+```
+
+Pulling an image does not replace the running database container. Before applying a future update, save a database backup outside the container and keep the existing named volume. Stay within PostgreSQL 18 for routine updates; a major-version change needs a separate migration procedure.
+
 ## Scope and future improvements
 
 Shortly is a portfolio/demo project, not a production-grade public shortener. A production version would add authentication, link management, abuse reporting, observability, database migrations, stronger rate-limiting controls, and a dedicated cleanup strategy for expired links.
