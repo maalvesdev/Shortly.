@@ -14,6 +14,7 @@ services:
       RATE_LIMIT_SECRET: "${RATE_LIMIT_SECRET:?Set RATE_LIMIT_SECRET in .env}"
       RATE_LIMIT_MAX_REQUESTS: "${RATE_LIMIT_MAX_REQUESTS:-10}"
       RATE_LIMIT_WINDOW_SECONDS: "${RATE_LIMIT_WINDOW_SECONDS:-3600}"
+      PROXY_HOPS: "${PROXY_HOPS:-0}"
     depends_on:
       db:
         condition: service_healthy

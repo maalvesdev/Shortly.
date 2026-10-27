@@ -49,7 +49,7 @@ templates/          Jinja HTML templates
 static/css/         Site styles
 static/js/          Browser behavior for form submission and copying links
 static/favicon/     Browser and web-app icon assets
-tests/              Automated application tests
+tests/              Database-free rule/configuration tests and PostgreSQL API tests
 Dockerfile          Python 3.14 application image running Gunicorn as a non-root user
 .dockerignore       Files excluded from the application image build
 compose.yaml        Local application and PostgreSQL services with health checks
@@ -114,11 +114,16 @@ Tests read `TEST_DATABASE_URL` from the terminal environment first, or from `.en
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | required | PostgreSQL connection string for local development or hosting |
-| `TEST_DATABASE_URL` | required for tests | Connection string for the separate `shortly_test` PostgreSQL database |
+| `TEST_DATABASE_URL` | required for integration tests | Connection string for the separate `shortly_test` PostgreSQL database |
 | `POSTGRES_PASSWORD` | required by Compose | Password used when initializing the local PostgreSQL container |
 | `RATE_LIMIT_SECRET` | required by Compose; development fallback in Python | Secret used to hash client IP addresses before storing rate-limit keys |
-| `RATE_LIMIT_MAX_REQUESTS` | `10` | Number of links an IP address may create per time window |
+| `RATE_LIMIT_MAX_REQUESTS` | `10` | Maximum validated link-creation requests per IP per time window |
 | `RATE_LIMIT_WINDOW_SECONDS` | `3600` | Rate-limit window in seconds; use `300` for five minutes |
+| `PROXY_HOPS` | `0` | Number of trusted reverse-proxy hops setting forwarding headers; leave at zero for direct local access |
+
+Both rate-limit settings must be positive integers. `PROXY_HOPS` must be a nonnegative integer. Invalid values stop application startup with an error naming the setting, before connecting to PostgreSQL.
+
+By default, Flask ignores `X-Forwarded-*` headers. For a deployment behind a trusted reverse proxy that sets both `X-Forwarded-For` and `X-Forwarded-Proto`, set `PROXY_HOPS` to the correct number of hops (for example, `1` for one proxy). Enable this only when requests reach the app through that proxy chain and the proxies overwrite or append the appropriate headers. A hop count does not authenticate a proxy. This follows [Werkzeug's forwarding-header guidance](https://werkzeug.palletsprojects.com/en/stable/middleware/proxy_fix/).
 
 Never commit real credentials. `.env` is ignored by Git; `.env.example` contains development-only examples. Use separate secrets in your host's environment-variable settings for any public deployment.
 
@@ -136,7 +141,7 @@ Never commit real credentials. `.env` is ignored by Git; `.env.example` contains
 }
 ```
 
-`custom_url` is optional. Send an empty `expires_in_hours` value for a link that does not expire.
+`custom_url` is optional. Omit `expires_in_hours`, or send `null` or an empty string, for a link that does not expire. Otherwise, send an integer or integer string from `1` to `8760` hours. Booleans, floats (including `1.0`), and other types return a JSON `400` error. Links expire at their stored expiration timestamp and their aliases remain reserved.
 
 `original_url` accepts HTTP or HTTPS URLs and adds `https://` when the scheme is omitted. Validation requires a valid hostname or IP address and a valid port when supplied. The scheme and hostname are normalized, including IDNA conversion of internationalized hostnames to ASCII; the path, query, and fragment are preserved, including correctly percent-encoded data.
 
@@ -157,7 +162,9 @@ Validation errors return `400`, an already-used alias returns `409`, and rate-li
 
 ## Tests
 
-The automated tests run against a dedicated PostgreSQL database. First, create it locally (run `createdb` only once):
+The suite contains database-free tests for URL/alias validation, expiration calculations, and startup configuration, plus API integration tests using PostgreSQL. Time-sensitive tests use a controlled clock instead of waiting for real time to pass.
+
+To run the full suite, first create the dedicated PostgreSQL test database locally (run `createdb` only once):
 
 ```powershell
 docker compose up -d --wait db
@@ -170,7 +177,7 @@ Run the suite in a separate, temporary application container:
 docker compose run --build --rm web python -m unittest discover -s tests -v
 ```
 
-This command uses the container's `TEST_DATABASE_URL`, removes the test container when it finishes, and does not publish its web port. The normal application can remain running. The suite covers custom-link creation and redirects, malformed hosts and ports, URL length boundaries, internationalized domains, duplicate aliases, expired links, and rate limiting. API tests also verify rejected URLs create no records and consume no rate-limit quota.
+This command uses the container's `TEST_DATABASE_URL`, removes the test container when it finishes, and does not publish its web port. The normal application can remain running. Coverage includes malformed JSON and field types, URL length boundaries, internationalized redirects, alias conflicts, random-code collisions, exact expiration boundaries, rate-limit window rollover and client isolation, invalid configuration, and forwarded-header handling. API tests verify validation failures create no records and consume no rate-limit quota; validated attempts that hit an alias conflict do count toward the quota.
 
 Tests verify the connected database is named `shortly_test` before creating tables or clearing data. They clear the `urls` and `rate_limits` tables in that database between tests. Keep it for tests only and run this suite serially, not with parallel test workers. The development database `shortly` is not used by these tests.
 
@@ -182,10 +189,12 @@ python -m unittest discover -s tests -v
 
 This alternative reads the host's `TEST_DATABASE_URL` from your terminal environment or `.env`, where the example points to `127.0.0.1:5432/shortly_test`.
 
-With the Python dependencies installed, the URL-validation unit tests can also run without PostgreSQL or Docker:
+With the Python dependencies installed, these commands run all database-free tests without PostgreSQL or Docker:
 
 ```powershell
 python -m unittest discover -s tests -p test_url_validation.py -v
+python -m unittest discover -s tests -p test_link_rules.py -v
+python -m unittest discover -s tests -p test_configuration.py -v
 ```
 
 ## Deployment notes

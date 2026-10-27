@@ -10,7 +10,7 @@ def consume_rate_limit(client_key, limit, window_seconds, now=None):
     current_time = int(now if now is not None else time.time())
     window_started_at = current_time - (current_time % window_seconds)
 
-    # Keep the small rate-limit table from accumulating expired hourly buckets.
+    # Keep the small rate-limit table from accumulating old window buckets.
     connection = get_db()
     connection.execute(
         "DELETE FROM rate_limits WHERE window_started_at < %s",

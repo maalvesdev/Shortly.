@@ -170,11 +170,14 @@ def normalize_alias(value):
 
 
 def calculate_expiry(value, max_expiry_hours):
+    """Validate integer hours and return an expiry timestamp, or None for never."""
     if value is None or value == "":
         return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise InvalidUrlError("Expiration must be a whole number of hours.")
     try:
         hours = int(value)
-    except (TypeError, ValueError) as error:
+    except ValueError as error:
         raise InvalidUrlError("Expiration must be a whole number of hours.") from error
     if not 1 <= hours <= max_expiry_hours:
         raise InvalidUrlError(f"Expiration must be between 1 and {max_expiry_hours} hours.")

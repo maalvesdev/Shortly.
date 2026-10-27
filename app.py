@@ -29,9 +29,10 @@ def create_app(test_config=None):
     app.config.from_mapping(
         DATABASE_URL=os.environ.get("DATABASE_URL"),
         MAX_EXPIRY_HOURS=8_760,
-        RATE_LIMIT_MAX_REQUESTS=int(os.environ.get("RATE_LIMIT_MAX_REQUESTS", "10")),
-        RATE_LIMIT_WINDOW_SECONDS=int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "3600")),
+        RATE_LIMIT_MAX_REQUESTS=os.environ.get("RATE_LIMIT_MAX_REQUESTS", "10"),
+        RATE_LIMIT_WINDOW_SECONDS=os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "3600"),
         RATE_LIMIT_SECRET=os.environ.get("RATE_LIMIT_SECRET", "development-only-change-me"),
+        PROXY_HOPS=os.environ.get("PROXY_HOPS", "0"),
     )
     if test_config:
         app.config.update(test_config)
@@ -45,8 +46,17 @@ def create_app(test_config=None):
     if not database_url.startswith(("postgres://", "postgresql://")):
         raise RuntimeError("DATABASE_URL must be a PostgreSQL connection URL.")
 
-    # Render forwards the original client address and HTTPS scheme in these headers.
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+    for name, minimum in (
+        ("RATE_LIMIT_MAX_REQUESTS", 1),
+        ("RATE_LIMIT_WINDOW_SECONDS", 1),
+        ("PROXY_HOPS", 0),
+    ):
+        app.config[name] = integer_setting(name, app.config[name], minimum)
+
+    # Enable only when requests arrive through this many trusted proxy hops.
+    proxy_hops = app.config["PROXY_HOPS"]
+    if proxy_hops:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxy_hops, x_proto=proxy_hops)
     app.teardown_appcontext(close_db)
     with app.app_context():
         init_db()
@@ -100,6 +110,20 @@ def create_app(test_config=None):
         return dynamic_link_response(redirect(destination))
 
     return app
+
+
+def integer_setting(name, value, minimum):
+    """Parse integer configuration and fail before connecting to the database."""
+    message = f"{name} must be an integer greater than or equal to {minimum}."
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise RuntimeError(message)
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise RuntimeError(message) from error
+    if parsed < minimum:
+        raise RuntimeError(message)
+    return parsed
 
 
 def api_error(message, status=400):
