@@ -2,7 +2,7 @@
 
 import time
 
-from database import execute, get_db
+from database import get_db
 
 
 def consume_rate_limit(client_key, limit, window_seconds, now=None):
@@ -11,17 +11,18 @@ def consume_rate_limit(client_key, limit, window_seconds, now=None):
     window_started_at = current_time - (current_time % window_seconds)
 
     # Keep the small rate-limit table from accumulating expired hourly buckets.
-    execute(
-        "DELETE FROM rate_limits WHERE window_started_at < ?",
+    connection = get_db()
+    connection.execute(
+        "DELETE FROM rate_limits WHERE window_started_at < %s",
         (window_started_at - window_seconds,),
     )
-    row = execute(
+    row = connection.execute(
         """INSERT INTO rate_limits (client_key, window_started_at, request_count)
-        VALUES (?, ?, 1)
+        VALUES (%s, %s, 1)
         ON CONFLICT (client_key, window_started_at)
         DO UPDATE SET request_count = rate_limits.request_count + 1
         RETURNING request_count""",
         (client_key, window_started_at),
     ).fetchone()
-    get_db().commit()
+    connection.commit()
     return row["request_count"] <= limit

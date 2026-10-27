@@ -6,7 +6,9 @@ import string
 import time
 from urllib.parse import urlparse
 
-from database import execute, get_db, is_integrity_error
+from psycopg.errors import UniqueViolation
+
+from database import get_db
 
 ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 SHORT_CODE_ALPHABET = string.ascii_letters + string.digits
@@ -101,22 +103,22 @@ def generate_short_code():
 
 
 def insert_url(short_code, original_url, expires_at):
+    connection = get_db()
     try:
-        execute(
-            "INSERT INTO urls (short_code, original_url, expires_at) VALUES (?, ?, ?)",
+        connection.execute(
+            "INSERT INTO urls (short_code, original_url, expires_at) VALUES (%s, %s, %s)",
             (short_code, original_url, expires_at),
         )
-        get_db().commit()
-    except Exception as error:
-        if is_integrity_error(error):
-            return False
-        raise
+        connection.commit()
+    except UniqueViolation:
+        connection.rollback()
+        return False
     return True
 
 
 def get_destination(short_code):
-    row = execute(
-        "SELECT original_url, expires_at FROM urls WHERE short_code = ?", (short_code,)
+    row = get_db().execute(
+        "SELECT original_url, expires_at FROM urls WHERE short_code = %s", (short_code,)
     ).fetchone()
     if row is None:
         return None

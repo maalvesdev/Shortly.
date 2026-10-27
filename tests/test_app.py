@@ -1,6 +1,10 @@
 import os
-import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import psycopg
+from dotenv import dotenv_values
 
 from app import create_app
 from database import get_db
@@ -8,13 +12,42 @@ from database import get_db
 
 class UrlShortenerTests(unittest.TestCase):
     def setUp(self):
-        self.database_file = tempfile.NamedTemporaryFile(delete=False)
-        self.database_file.close()
-        self.app = create_app({"TESTING": True, "DATABASE": self.database_file.name})
-        self.client = self.app.test_client()
+        local_settings = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
+        self.database_url = os.environ.get("TEST_DATABASE_URL", local_settings.get("TEST_DATABASE_URL"))
+        if not self.database_url:
+            raise ValueError(
+                "TEST_DATABASE_URL is required. Set it in .env or your environment "
+                "to a separate PostgreSQL database named shortly_test."
+            )
+        if not self.database_url.startswith(("postgres://", "postgresql://")):
+            raise ValueError("TEST_DATABASE_URL must be a PostgreSQL connection URL.")
 
-    def tearDown(self):
-        os.unlink(self.database_file.name)
+        # Verify the database before application initialization writes any schema.
+        with psycopg.connect(self.database_url) as connection:
+            database_name = connection.execute("SELECT current_database()").fetchone()[0]
+            if database_name != "shortly_test":
+                raise ValueError("PostgreSQL tests must use the separate shortly_test database.")
+
+        self.test_config = {
+            "TESTING": True,
+            "DATABASE_URL": self.database_url,
+            "RATE_LIMIT_SECRET": "shortly-test-only",
+            "RATE_LIMIT_MAX_REQUESTS": 10,
+            "RATE_LIMIT_WINDOW_SECONDS": 3600,
+        }
+        self.app = create_app(self.test_config)
+        self.client = self.app.test_client()
+        self.clear_postgres_tables()
+        self.addCleanup(self.clear_postgres_tables)
+
+    def clear_postgres_tables(self):
+        with self.app.app_context():
+            connection = get_db()
+            database_name = connection.execute("SELECT current_database() AS name").fetchone()["name"]
+            if database_name != "shortly_test":
+                raise ValueError("Refusing to clear a database other than shortly_test.")
+            connection.execute("TRUNCATE TABLE urls, rate_limits")
+            connection.commit()
 
     def test_creates_and_redirects_a_custom_link(self):
         response = self.client.post("/api/shorten", json={"original_url": "example.com/docs", "custom_url": "portfolio-demo"})
@@ -35,8 +68,7 @@ class UrlShortenerTests(unittest.TestCase):
     def test_invalid_requests_do_not_consume_rate_limit_quota(self):
         limited_app = create_app(
             {
-                "TESTING": True,
-                "DATABASE": self.database_file.name,
+                **self.test_config,
                 "RATE_LIMIT_MAX_REQUESTS": 1,
                 "RATE_LIMIT_WINDOW_SECONDS": 300,
             }
@@ -71,9 +103,25 @@ class UrlShortenerTests(unittest.TestCase):
             "This custom alias is already taken.",
         )
 
+    def test_random_code_collision_retries_without_replacing_the_existing_link(self):
+        self.client.post(
+            "/api/shorten",
+            json={"original_url": "https://example.com/original", "custom_url": "taken-code"},
+        )
+        with patch("url_service.generate_short_code", side_effect=["taken-code", "new-code"]):
+            response = self.client.post(
+                "/api/shorten", json={"original_url": "https://example.com/new"}
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json["short_code"], "new-code")
+        self.assertEqual(self.client.get("/new-code").headers["Location"], "https://example.com/new")
+        self.assertEqual(
+            self.client.get("/taken-code").headers["Location"], "https://example.com/original"
+        )
+
     def test_expired_link_returns_gone_page(self):
         with self.app.app_context():
-            get_db().execute("INSERT INTO urls VALUES (?, ?, ?)", ("old-link", "https://example.com", 1))
+            get_db().execute("INSERT INTO urls VALUES (%s, %s, %s)", ("old-link", "https://example.com", 1))
             get_db().commit()
         for _ in range(2):
             response = self.client.get("/old-link")
@@ -89,8 +137,7 @@ class UrlShortenerTests(unittest.TestCase):
     def test_rate_limit_blocks_the_third_request_when_limit_is_two(self):
         limited_app = create_app(
             {
-                "TESTING": True,
-                "DATABASE": self.database_file.name,
+                **self.test_config,
                 "RATE_LIMIT_MAX_REQUESTS": 2,
                 "RATE_LIMIT_WINDOW_SECONDS": 300,
             }
@@ -102,6 +149,19 @@ class UrlShortenerTests(unittest.TestCase):
         response = limited_client.post("/api/shorten", json=payload)
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.headers["Retry-After"], "300")
+
+
+class ApplicationConfigurationTests(unittest.TestCase):
+    def test_missing_database_url_explains_how_to_configure_postgresql(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "DATABASE_URL is required"):
+                create_app({"TESTING": True})
+
+    def test_non_postgresql_database_settings_are_rejected(self):
+        for database_url in ("database.db", "sqlite:///database.db", "mysql://localhost/shortly"):
+            with self.subTest(database_url=database_url):
+                with self.assertRaisesRegex(RuntimeError, "PostgreSQL connection URL"):
+                    create_app({"TESTING": True, "DATABASE_URL": database_url})
 
 
 if __name__ == "__main__":

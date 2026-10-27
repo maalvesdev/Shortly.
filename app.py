@@ -5,6 +5,7 @@ import os
 import hashlib
 
 from flask import Flask, jsonify, make_response, redirect, render_template, request
+from dotenv import load_dotenv
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from database import close_db, init_db
@@ -21,10 +22,12 @@ from url_service import (
 
 def create_app(test_config=None):
     """Create and configure the Flask application."""
+    if test_config is None:
+        load_dotenv(Path(__file__).with_name(".env"))
+
     app = Flask(__name__)
     app.config.from_mapping(
-        # Render supplies DATABASE_URL in production. SQLite keeps local setup simple.
-        DATABASE=os.environ.get("DATABASE_URL") or Path(__file__).with_name("database.db"),
+        DATABASE_URL=os.environ.get("DATABASE_URL"),
         MAX_EXPIRY_HOURS=8_760,
         RATE_LIMIT_MAX_REQUESTS=int(os.environ.get("RATE_LIMIT_MAX_REQUESTS", "10")),
         RATE_LIMIT_WINDOW_SECONDS=int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "3600")),
@@ -32,6 +35,15 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+
+    database_url = app.config["DATABASE_URL"]
+    if not isinstance(database_url, str) or not database_url.strip():
+        raise RuntimeError(
+            "DATABASE_URL is required. Copy .env.example to .env, configure the "
+            "PostgreSQL connection, and start the database with docker compose up -d --wait db."
+        )
+    if not database_url.startswith(("postgres://", "postgresql://")):
+        raise RuntimeError("DATABASE_URL must be a PostgreSQL connection URL.")
 
     # Render forwards the original client address and HTTPS scheme in these headers.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
@@ -107,8 +119,5 @@ def get_client_key(secret):
     return hashlib.sha256(f"{secret}:{client_ip}".encode()).hexdigest()
 
 
-app = create_app()
-
-
 if __name__ == "__main__":
-    app.run()
+    create_app().run()
