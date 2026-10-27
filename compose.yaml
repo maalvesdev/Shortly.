@@ -1,6 +1,29 @@
 name: shortly
 
 services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:5000:5000"
+    environment:
+      # Containers connect through the service name, not the host's localhost.
+      DATABASE_URL: postgresql://db:5432/shortly
+      TEST_DATABASE_URL: postgresql://db:5432/shortly_test
+      PGUSER: shortly
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      RATE_LIMIT_SECRET: "${RATE_LIMIT_SECRET:?Set RATE_LIMIT_SECRET in .env}"
+      RATE_LIMIT_MAX_REQUESTS: "${RATE_LIMIT_MAX_REQUESTS:-10}"
+      RATE_LIMIT_WINDOW_SECONDS: "${RATE_LIMIT_WINDOW_SECONDS:-3600}"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   db:
     image: postgres:18
     environment:

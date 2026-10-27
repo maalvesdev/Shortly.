@@ -18,7 +18,7 @@ This project is a practical exercise in the backend and deployment fundamentals 
 - Prevents accidental redirect chains by rejecting links back to Shortly itself
 - Displays dedicated pages for missing (`404`) and expired (`410`) links
 - Uses a database-backed rate limit to reduce link-creation spam
-- Runs PostgreSQL locally through Docker Compose
+- Runs the application and PostgreSQL locally through Docker Compose
 
 TODO:
 QR Code generator, link data
@@ -29,7 +29,7 @@ QR Code generator, link data
 | --- | --- |
 | Backend | Python, Flask |
 | Database | PostgreSQL (local or hosted) |
-| Local database environment | Docker Compose |
+| Local environment | Docker Compose (application and database) |
 | PostgreSQL driver | psycopg |
 | Front end | HTML, CSS, JavaScript |
 | Production server | Gunicorn |
@@ -48,26 +48,24 @@ static/css/         Site styles
 static/js/          Browser behavior for form submission and copying links
 static/favicon/     Browser and web-app icon assets
 tests/              Automated application tests
-compose.yaml        Local PostgreSQL service, persistent storage, and health check
+Dockerfile          Python 3.14 application image running Gunicorn as a non-root user
+.dockerignore       Files excluded from the application image build
+compose.yaml        Local application and PostgreSQL services with health checks
 .env.example        Example local configuration (copy to .env)
 ```
 
 ## Run locally
 
-Requirements: Python 3.10+, Docker Desktop running with Linux containers, and PowerShell (commands below are for Windows).
+Requirements: Docker Desktop running with Linux containers and PowerShell (commands below are for Windows). Python runs inside the application container, so a separate Python installation is not needed for this workflow.
 
-Run these commands from the project folder. Copy `.env.example` only when you do not already have a `.env` file:
+Run these commands from the project folder. The first command copies `.env.example` only if `.env` does not already exist:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-docker compose up -d --wait db
-python app.py
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+docker compose up --build --wait
 ```
 
-Open `http://127.0.0.1:5000` in a browser. Flask runs on your computer; PostgreSQL runs in Docker and is reachable only through `127.0.0.1:5432`. The application creates its tables automatically.
+The command builds the application image, starts both services in the background, and waits for their health checks. Open `http://127.0.0.1:5000` in a browser. Flask runs behind Gunicorn in the `web` container, and PostgreSQL runs in the `db` container. Their published ports are bound to your computer's loopback interface: `127.0.0.1:5000` for the app and `127.0.0.1:5432` for PostgreSQL. The application creates its tables automatically.
 
 The example credentials are for local development only. If you change `POSTGRES_PASSWORD`, update the password in both `DATABASE_URL` and `TEST_DATABASE_URL`. PostgreSQL applies its initialization credentials only when creating an empty data volume; editing `.env` later does not change an existing database password.
 
@@ -75,20 +73,39 @@ PostgreSQL stores its data in the named Docker volume `shortly_postgres_data`, s
 
 To inspect the database in DBeaver, use host `127.0.0.1`, port `5432`, database `shortly`, username `shortly`, and the password from your local `.env` file. SSL is not required for this local connection.
 
-Useful database commands:
+Useful commands:
 
 ```powershell
 docker compose ps
-docker compose logs db
-docker compose stop db
-docker compose up -d --wait db
+docker compose logs -f web
+docker compose stop
+docker compose up --build --wait
 ```
 
-Stop Flask with `Ctrl+C`. Avoid `docker compose down -v` unless you intend to permanently delete the local PostgreSQL data volume.
+Use `Ctrl+C` to stop following logs; this does not stop the containers. `docker compose stop` stops both services, and the final command starts them again. Application files are copied into the image, so run `docker compose up --build --wait` after source changes; the container does not reload code automatically.
+
+Avoid `docker compose down -v` unless you intend to permanently delete the local PostgreSQL data volume.
+
+### Optional: run Flask directly with Python
+
+For editing and debugging outside the application container, install Python 3.10+ and use the local URLs from `.env`. Stop the `web` container first because it uses the same port as the Python development server:
+
+```powershell
+docker compose stop web
+docker compose up -d --wait db
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
+```
+
+Open the same `http://127.0.0.1:5000` address. Stop this development server with `Ctrl+C` before starting the `web` container again.
 
 ## Configuration
 
-Normal application startup reads `.env` from the project folder. Variables already set in your terminal or hosting environment take precedence. `DATABASE_URL` is required and must be a PostgreSQL connection URL (`postgresql://` or `postgres://`).
+Docker Compose reads the host's `.env` file and passes the required settings to the containers. The file is excluded from the application image. Inside `web`, Compose sets `DATABASE_URL` to `postgresql://db:5432/shortly` and `TEST_DATABASE_URL` to `postgresql://db:5432/shortly_test`, using the `db` service name on Docker's network. The database client in `web` receives the username through `PGUSER` and the password through `PGPASSWORD`, populated from `POSTGRES_PASSWORD`.
+
+The `127.0.0.1` URLs in `.env` remain available for running Python directly on your computer and for database tools. Normal Python application startup reads `.env` from the project folder; variables already set in your terminal or hosting environment take precedence. `DATABASE_URL` is required and must be a PostgreSQL connection URL (`postgresql://` or `postgres://`).
 
 Tests read `TEST_DATABASE_URL` from the terminal environment first, or from `.env` if it is not set, and pass explicit configuration to the application. Reading the test configuration does not load `.env` values into the process environment.
 
@@ -97,7 +114,7 @@ Tests read `TEST_DATABASE_URL` from the terminal environment first, or from `.en
 | `DATABASE_URL` | required | PostgreSQL connection string for local development or hosting |
 | `TEST_DATABASE_URL` | required for tests | Connection string for the separate `shortly_test` PostgreSQL database |
 | `POSTGRES_PASSWORD` | required by Compose | Password used when initializing the local PostgreSQL container |
-| `RATE_LIMIT_SECRET` | development-only value | Secret used to hash client IP addresses before storing rate-limit keys |
+| `RATE_LIMIT_SECRET` | required by Compose; development fallback in Python | Secret used to hash client IP addresses before storing rate-limit keys |
 | `RATE_LIMIT_MAX_REQUESTS` | `10` | Number of links an IP address may create per time window |
 | `RATE_LIMIT_WINDOW_SECONDS` | `3600` | Rate-limit window in seconds; use `300` for five minutes |
 
@@ -139,15 +156,23 @@ docker compose up -d --wait db
 docker compose exec db createdb -U shortly shortly_test
 ```
 
-The example `.env` configuration sets `TEST_DATABASE_URL` to this separate `shortly_test` database. Run the suite with:
+Run the suite in a separate, temporary application container:
+
+```powershell
+docker compose run --build --rm web python -m unittest discover -s tests -v
+```
+
+This command uses the container's `TEST_DATABASE_URL`, removes the test container when it finishes, and does not publish its web port. The normal application can remain running. The suite covers custom-link creation and redirects, invalid input, duplicate aliases, expired links, and rate limiting.
+
+Tests verify the connected database is named `shortly_test` before creating tables or clearing data. They clear the `urls` and `rate_limits` tables in that database between tests. Keep it for tests only and run this suite serially, not with parallel test workers. The development database `shortly` is not used by these tests.
+
+If you installed the Python dependencies using the optional workflow above, you can also run the same suite directly on your computer:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-You can override `TEST_DATABASE_URL` in your terminal environment when needed. The suite covers custom-link creation and redirects, invalid input, duplicate aliases, expired links, and rate limiting.
-
-Tests verify the connected database is named `shortly_test` before creating tables or clearing data. They clear the `urls` and `rate_limits` tables in that database between tests. Keep it for tests only and run this suite serially, not with parallel test workers. The development database `shortly` is not used by these tests.
+This alternative reads the host's `TEST_DATABASE_URL` from your terminal environment or `.env`, where the example points to `127.0.0.1:5432/shortly_test`.
 
 ## Deployment notes
 
