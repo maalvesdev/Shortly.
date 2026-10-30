@@ -2,7 +2,7 @@
 
 Turn a long URL into a link that's easier to share. Choose a memorable alias, set an expiration time for a temporary link, or let Shortly generate a short code for you.
 
-**[Try the live demo](https://shortly-go.vercel.app/)**
+**[Try it yourself](https://shortly-go.vercel.app/)**
 
 ![URLshort demo](static/demo.gif)
 
