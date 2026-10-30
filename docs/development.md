@@ -2,16 +2,17 @@
 
 [Back to Shortly](../README.md) · [API reference](api.md) · [Container maintenance and security review](security.md)
 
-This guide contains the setup and configuration details behind the README's quick start. The project runs locally without a hosting account; it was previously deployed on Render.
+This guide contains the setup and configuration details behind the README's quick start. The [live demo](https://shortly-go.vercel.app/) runs on Vercel with PostgreSQL hosted on Neon. The app and database can also run locally without a hosting account.
 
 ## Project structure
 
 ```text
 app.py              Flask application factory and HTTP routes
+wsgi.py             Vercel entry point exporting the Flask application
 url_service.py      URL and alias validation, expiration, persistence, and redirects
 database.py         PostgreSQL connections, schema setup, and parameterized SQL
 rate_limit.py       Database-backed fixed-window rate limiter
-init_db.py          Optional entry point to initialize the database schema
+init_db.py          Schema initialization entry point, also used during deployment builds
 templates/          Shared Jinja layout, form, and missing/expired pages
 static/css/         Site styles
 static/js/          Form submission and copying links
@@ -22,6 +23,13 @@ Dockerfile          Python 3.14 image running Gunicorn as a non-root user
 .dockerignore       Files excluded from the image build
 compose.yaml        Local application and PostgreSQL services
 .env.example        Example local configuration
+vercel.json         Flask deployment and build configuration
+.python-version     Python version selected for Vercel
+scripts/            Static asset preparation for Vercel
+neon.ts             Neon service and branch configuration
+package.json        Neon configuration dependencies and a Python build wrapper
+package-lock.json   Locked Node tooling dependencies
+
 docs/               Development, API, and security reference material
 ```
 
@@ -83,7 +91,7 @@ Link destinations, aliases, and expiration timestamps are stored in `urls`. Fixe
 
 ## Run Flask directly with Python
 
-For editing and debugging outside the application container, install Python 3.10+ and use the local connection URLs from `.env`. Stop `web` first because it uses the same port as the Python development server:
+For editing and debugging outside the application container, install Python 3.10+. The commands below assume `.env` contains the local connection URLs from `.env.example`. Python uses whichever database `DATABASE_URL` points to, so a Neon URL connects to the hosted database instead. Stop `web` first because it uses the same port as the Python development server:
 
 ```powershell
 docker compose stop web
@@ -102,7 +110,7 @@ Docker Compose reads the host `.env` file and passes the configured settings to 
 
 Inside `web`, Compose supplies `DATABASE_URL=postgresql://db:5432/shortly` and `TEST_DATABASE_URL=postgresql://db:5432/shortly_test`. The hostname `db` refers to the database service on Docker's network. The client receives its username through `PGUSER` and its password through `PGPASSWORD`, populated from `POSTGRES_PASSWORD`.
 
-The `127.0.0.1` URLs in `.env` are used when running Python directly on your computer or connecting database tools. Normal Python startup reads `.env` from the project folder; variables already set in the terminal or hosting environment take precedence.
+The `127.0.0.1` URLs in `.env.example` are for running Python directly on your computer or connecting database tools to local PostgreSQL. A host `.env` can instead contain a hosted connection URL; Compose still supplies its own internal database URLs to the containers. Normal Python startup reads `.env` from the project folder; variables already set in the terminal or hosting environment take precedence.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -176,7 +184,22 @@ python -m unittest discover -s tests -p test_configuration.py -v
 
 ## Deployment notes
 
-Hosting is optional. Configure `DATABASE_URL` for the chosen PostgreSQL service and a separate `RATE_LIMIT_SECRET`, following the provider's connection and SSL requirements. Keep `.env` local. Schema creation happens automatically on startup.
+### Current hosting
+
+The public demo uses Vercel for the Flask application and Neon for PostgreSQL:
+
+- [wsgi.py](../wsgi.py) exports the application created by `create_app()` for Vercel's Python runtime.
+- [vercel.json](../vercel.json) selects Flask and defines the build. It initializes the database schema, then [prepares static assets](../scripts/prepare_vercel.py) in `public/static` so existing CSS, JavaScript, and favicon paths work through Vercel.
+- Flask connects to Neon through the pooled `DATABASE_URL` with TLS using the existing `psycopg` driver. Database connections remain scoped to the application context.
+- Database credentials, the rate-limit secret, and proxy settings are read from environment variables in Vercel. Local `.env` files are excluded from deployment and Git.
+
+[neon.ts](../neon.ts) declares the Neon service and branch policy. The Node packages in [package.json](../package.json) support this configuration tooling; `npm run build` wraps the existing Python build commands. Node tooling is optional for the Docker quick start and is not part of Flask's request handling.
+
+The local Docker database and hosted Neon database have separate data. Running the app locally with Compose does not copy links to or from the live demo. PostgreSQL integration tests use the separate `shortly_test` database described above.
+
+### Other Python hosts
+
+Hosting is optional. For another host, configure `DATABASE_URL` and a separate `RATE_LIMIT_SECRET`, following the provider's connection and SSL requirements. Schema creation happens automatically on startup.
 
 For a Linux host, use:
 

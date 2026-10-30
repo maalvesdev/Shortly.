@@ -2,6 +2,8 @@
 
 Turn a long URL into a link that's easier to share. Choose a memorable alias, set an expiration time for a temporary link, or let Shortly generate a short code for you.
 
+**[Try the live demo](https://shortly-go.vercel.app/)**
+
 ![URLshort demo](static/demo.gif)
 
 ## What you can do
@@ -33,11 +35,18 @@ Short link:  http://127.0.0.1:5000/reading-list
 
 | Area | Technologies |
 | --- | --- |
-| Application | Python, Flask, Gunicorn |
+| Application | Python, Flask |
 | Interface | HTML, CSS, JavaScript, Jinja templates |
 | Database | PostgreSQL, psycopg |
-| Local environment | Docker, Docker Compose |
+| Hosting | Vercel, Neon |
+| Local environment | Docker, Docker Compose, Gunicorn |
 | Tests | Python `unittest` |
+
+## Hosting
+
+The live demo runs on **Vercel**, which serves the Flask pages, API, and redirects. **Neon** provides the hosted PostgreSQL database. Flask uses the same `psycopg` driver for hosted and local database connections.
+
+You can also run the app and database entirely on your computer with Docker Compose. See the [hosting notes](docs/development.md#deployment-notes) for a brief explanation of the deployment files and environment configuration.
 
 ## Try it locally
 
