@@ -9,3 +9,5 @@
 .pytest_cache
 .coverage
 htmlcov
+public
+.vercel

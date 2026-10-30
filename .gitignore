@@ -2,3 +2,9 @@ __pycache__/
 database.db
 .venv/
 .env
+.env.*
+!.env.example
+
+# Generated deployment output and Vercel's local project metadata.
+public/
+.vercel/
