@@ -4,7 +4,7 @@ Turn a long URL into a link that's easier to share. Choose a memorable alias, se
 
 **[Try it yourself](https://shortly-go.vercel.app/)**
 
-![URLshort demo](static/demo.gif)
+![URLshort demo](static/shortly.gif)
 
 ## What you can do
 
