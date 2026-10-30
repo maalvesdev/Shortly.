@@ -6,7 +6,7 @@
     <main class="page-shell">
         <header class="brand-header" aria-labelledby="page-title">
             <div class="brand-lockup">
-                <h1 id="page-title">Shortly.</h1>
+                <h1 id="page-title">Shortly<span class="brand-dot">.</span></h1>
             </div>
             <p class="intro">
                 Create a clean, shareable URL with an optional custom alias and expiration date.
@@ -16,20 +16,26 @@
         <section class="card form-card" aria-label="Create a short link">
             <form id="shorten-form" novalidate>
                 <div class="form-fields">
-                    <label for="longUrl">Destination URL</label>
-                    <input
-                        id="longUrl"
-                        name="original_url"
-                        type="url"
-                        inputmode="url"
-                        placeholder="https://example.com/a-very-long-link"
-                        autocomplete="url"
-                        required
-                    >
+                    <div class="field">
+                        <label for="longUrl">Destination URL</label>
+                        <input
+                            id="longUrl"
+                            name="original_url"
+                            type="url"
+                            inputmode="url"
+                            placeholder="https://example.com/a-very-long-link"
+                            autocomplete="url"
+                            required
+                        >
+                    </div>
 
-                    <div class="field-row">
-                        <div>
-                            <label for="customUrl">Custom alias <span>(optional)</span></label>
+                    <div class="field">
+                        <div class="field-label">
+                            <label for="customUrl">Custom alias</label>
+                            <span class="optional-label">optional</span>
+                        </div>
+                        <div class="alias-input">
+                            <span class="alias-prefix" title="{{ request.host }}/" aria-hidden="true">{{ request.host }}/</span>
                             <input
                                 id="customUrl"
                                 name="custom_url"
@@ -41,17 +47,33 @@
                                 autocomplete="off"
                             >
                         </div>
-
-                        <div>
-                            <label for="expiryTime">Expires</label>
-                            <select id="expiryTime" name="expires_in_hours">
-                                <option value="1" selected>In 1 hour</option>
-                                <option value="24">In 24 hours</option>
-                                <option value="168">In 7 days</option>
-                                <option value="">Never</option>
-                            </select>
-                        </div>
                     </div>
+
+                    <fieldset class="field expiry-field">
+                        <legend>Expires</legend>
+                        <div class="expiry-options">
+                            <label class="expiry-option">
+                                <input type="radio" name="expires_in_hours" value="1" aria-label="1 hour" checked>
+                                <span class="expiry-pill">1h</span>
+                            </label>
+                            <label class="expiry-option">
+                                <input type="radio" name="expires_in_hours" value="24" aria-label="1 day">
+                                <span class="expiry-pill">1d</span>
+                            </label>
+                            <label class="expiry-option">
+                                <input type="radio" name="expires_in_hours" value="168" aria-label="7 days">
+                                <span class="expiry-pill">7d</span>
+                            </label>
+                            <label class="expiry-option">
+                                <input type="radio" name="expires_in_hours" value="720" aria-label="30 days">
+                                <span class="expiry-pill">30d</span>
+                            </label>
+                            <label class="expiry-option">
+                                <input type="radio" name="expires_in_hours" value="" aria-label="Never expires">
+                                <span class="expiry-pill">Never</span>
+                            </label>
+                        </div>
+                    </fieldset>
 
                     <p id="errorMsg" class="message error" role="alert" aria-live="polite"></p>
                 </div>

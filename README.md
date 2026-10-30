@@ -10,7 +10,7 @@ Turn a long URL into a link that's easier to share. Choose a memorable alias, se
 
 - **Shorten and share:** create a short link that automatically redirects visitors to its destination.
 - **Make it recognizable:** use a custom alias such as `reading-list`, or leave it blank for a generated code.
-- **Choose when it expires:** select 1 hour, 24 hours, 7 days, or never. The form starts with 1 hour selected.
+- **Choose when it expires:** select 1 hour, 24 hours, 7 days, 30 days, or never. The form starts with 1 hour selected.
 - **Copy in one click:** copy the result from the page and share it.
 - **Get useful feedback:** see a message when a URL is invalid or an alias is taken; visitors get dedicated pages for missing and expired links.
 - **Limit excessive creation:** requests to create links are limited per IP address, with a message when the quota is reached.

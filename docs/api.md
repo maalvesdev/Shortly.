@@ -57,7 +57,7 @@ A supplied alias must contain 3–32 ASCII letters, numbers, hyphens, or undersc
 
 For direct API requests, omit `expires_in_hours`, send `null`, or use an empty string for no expiration. Otherwise, send an integer or integer string from `1` to `8760` hours. Booleans, floats (including `1.0`), and other types return `400`.
 
-The browser form selects **1 hour by default** and also offers 24 hours, 7 days, and never. A link stops redirecting at its stored expiration timestamp; the record and alias remain reserved.
+The browser form selects **1 hour by default** and also offers 24 hours, 7 days, 30 days, and never. A link stops redirecting at its stored expiration timestamp; the record and alias remain reserved.
 
 ## Rate limiting
 
