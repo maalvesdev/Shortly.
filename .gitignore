@@ -8,3 +8,5 @@ database.db
 # Generated deployment output and Vercel's local project metadata.
 public/
 .vercel/
+.neon
+node_modules/

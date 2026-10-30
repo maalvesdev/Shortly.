@@ -11,3 +11,6 @@
 htmlcov
 public
 .vercel
+node_modules
+.agents
+.neon

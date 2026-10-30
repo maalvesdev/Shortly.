@@ -6,3 +6,6 @@ database.db
 **/__pycache__/
 tests/
 docs/
+node_modules/
+.agents/
+.neon
